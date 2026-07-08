@@ -1,54 +1,66 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Reveal Game</title>
-<style>
-    body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; min-height:100vh; font-family:Arial, sans-serif; }
-    #reveal-game-wrapper { display:inline-block; position:relative; }
-    #reveal-game { 
-        position:relative; width:300px; border:4px solid #333; background:#111; overflow:hidden;
-    }
-    .hud { padding:8px; text-align:center; color:white; }
-    .controls { padding:10px; text-align:center; }
-    button { width:60px; height:60px; font-size:24px; margin:2px; background:#333; color:white; border:none; border-radius:8px; }
-</style>
-</head>
-<body>
-
-<div id="reveal-game-wrapper">
-    <div id="reveal-game">
-        <div class="hud">
+<div id="reveal-game-wrapper" style="display: inline-block; position: relative; max-width: 340px; margin: 20px auto;">
+    <div id="reveal-game" style="position: relative; width: 300px; margin: 0 auto; border: 4px solid #333; background: #111; overflow: hidden;">
+       
+        <div class="hud" style="padding: 8px; text-align: center; color: white; font-family: Arial, sans-serif;">
             Level: <span id="level-num">1</span> |
             Revealed: <span id="percent">0</span>%
         </div>
        
-        <div style="position:relative;">
-            <img id="bg-image" style="position:absolute; top:0; left:0; width:300px; height:400px; object-fit:cover; z-index:1;" alt="">
-            <canvas id="gameCanvas" width="300" height="400" style="position:relative; z-index:2; image-rendering:pixelated;"></canvas>
+        <div style="position: relative;">
+            <img id="bg-image" style="position: absolute; top: 0; left: 0; width: 300px; height: 400px; object-fit: cover; z-index: 1;" alt="">
+            <canvas id="gameCanvas" width="300" height="400" style="position: relative; z-index: 2; image-rendering: pixelated;"></canvas>
         </div>
        
-        <div id="message" style="padding:10px; text-align:center; min-height:50px; color:white;"></div>
+        <div id="message" style="padding: 10px; text-align: center; min-height: 50px; font-family: Arial, sans-serif;"></div>
        
-        <div class="controls">
-            <button id="btn-up">↑</button><br>
-            <button id="btn-left">←</button>
-            <button id="btn-down">↓</button>
-            <button id="btn-right">→</button>
-            <br><button id="btn-random" style="margin-top:8px; font-size:14px; padding:5px 12px;">Random Image</button>
+        <div class="controls" style="padding: 10px; text-align: center;">
+            <button id="btn-up" style="width:60px;height:60px;font-size:24px;margin:2px;">↑</button><br>
+            <button id="btn-left" style="width:60px;height:60px;font-size:24px;margin:2px;">←</button>
+            <button id="btn-down" style="width:60px;height:60px;font-size:24px;margin:2px;">↓</button>
+            <button id="btn-right" style="width:60px;height:60px;font-size:24px;margin:2px;">→</button>
         </div>
     </div>
 </div>
 
 <script>
-// ==================== CONFIG ====================
-const IMAGE_FOLDER = 'images/';           // ← change only if your folder name differs
-const IMAGE_BASE = 'pic';                 // pic1, pic2, ...
-
+// ==================== FIXED IMAGE LOADER ====================
 let imageList = [];
 
-// Try common extensions in order
-const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+async function loadAllImages() {
+    imageList = [];
+    const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const maxImages = 50;
+
+    for (let i = 1; i <= maxImages; i++) {
+        for (let ext of extensions) {
+            const path = `images/pic${i}${ext}`;
+            try {
+                const exists = await new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => resolve(true);
+                    img.onerror = () => resolve(false);
+                    img.src = path;
+                });
+                if (exists) {
+                    imageList.push(path);
+                    break;
+                }
+            } catch (e) {}
+        }
+    }
+
+    if (imageList.length === 0) {
+        console.warn("No images found in /images/ folder!");
+        imageList = ['https://picsum.photos/id/1015/300/400']; // public fallback
+    }
+    console.log(`Loaded ${imageList.length} images automatically`);
+}
+
+function initImage() {
+    if (imageList.length === 0) return;
+    const randomPic = imageList[Math.floor(Math.random() * imageList.length)];
+    document.getElementById('bg-image').src = randomPic;
+}
 
 // ==================== GAME CODE ====================
 const canvas = document.getElementById('gameCanvas');
@@ -59,6 +71,8 @@ const messageDisplay = document.getElementById('message');
 const levelDisplay = document.getElementById('level-num');
 
 const WIDTH = 300, HEIGHT = 400;
+canvas.width = WIDTH; canvas.height = HEIGHT;
+
 const CELL_SIZE = 5;
 const COLS = WIDTH / CELL_SIZE;
 const ROWS = HEIGHT / CELL_SIZE;
@@ -69,55 +83,12 @@ const MODE_PLAYING = 'PLAYING', MODE_LEVEL_CLEAR = 'LEVEL_CLEAR', MODE_GAME_OVER
 let currentMode = MODE_PLAYING;
 let grid = [];
 let player = { x: 0, y: 0, dir: null, nextDir: null, drawing: false, lastMoveTime: 0 };
-let enemy = { x: Math.floor(COLS/2), y: Math.floor(ROWS/2), dx: 1, dy: 1, lastMoveTime: 0 };
 let currentLevel = 1;
+let enemy = { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2), dx: 1, dy: 1, lastMoveTime: 0 };
 let revealedPercentage = 0;
 let stateResetTimer = 0;
 const PLAYER_MOVE_DELAY = 35;
 
-// Load images reliably
-async function loadImageList() {
-    imageList = [];
-    // Try up to 50 images
-    for (let i = 1; i <= 50; i++) {
-        for (let ext of extensions) {
-            const url = `${IMAGE_FOLDER}${IMAGE_BASE}${i}${ext}`;
-            try {
-                const exists = await imageExists(url);
-                if (exists) {
-                    imageList.push(url);
-                    break;
-                }
-            } catch(e) {}
-        }
-    }
-    
-    if (imageList.length === 0) {
-        console.warn("No images found in", IMAGE_FOLDER);
-        // Fallback to a public image if you want
-        imageList = ['https://picsum.photos/id/1015/300/400'];
-    }
-    
-    console.log(`✅ Loaded ${imageList.length} images`);
-    return imageList;
-}
-
-function imageExists(url) {
-    return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(true);
-        img.onerror = () => resolve(false);
-        img.src = url;
-    });
-}
-
-function initImage() {
-    if (imageList.length === 0) return;
-    const randomPic = imageList[Math.floor(Math.random() * imageList.length)];
-    bgImage.src = randomPic;
-}
-
-// Rest of the game (same logic, minor cleanups)
 function initGrid() {
     grid = Array(ROWS).fill().map(() => Array(COLS).fill(STATE_HIDDEN));
     for (let r = 0; r < ROWS; r++) {
@@ -128,11 +99,8 @@ function initGrid() {
     }
 }
 
-// ... (update, draw, floodFillSlice, etc. stay almost identical)
-
 function update(timestamp) {
     if (currentMode === MODE_PLAYING) {
-        // Direction handling
         if (player.nextDir) {
             let invalid = false;
             if (player.drawing) {
@@ -145,7 +113,6 @@ function update(timestamp) {
             player.nextDir = null;
         }
 
-        // Player move
         if (player.dir && (!player.lastMoveTime || timestamp - player.lastMoveTime >= PLAYER_MOVE_DELAY)) {
             player.lastMoveTime = timestamp;
             let nx = player.x, ny = player.y;
@@ -173,38 +140,31 @@ function update(timestamp) {
             }
         }
 
-        // Enemy movement
-        const enemyDelay = Math.max(20, 130 - currentLevel * 15);
-        if (timestamp - enemy.lastMoveTime >= enemyDelay) {
+        let delay = Math.max(20, 130 - currentLevel * 15);
+        if (!enemy.lastMoveTime) enemy.lastMoveTime = timestamp;
+        if (timestamp - enemy.lastMoveTime >= delay) {
             enemy.lastMoveTime = timestamp;
             let ex = enemy.x + enemy.dx;
             let ey = enemy.y + enemy.dy;
-
             if (ex < 0 || ex >= COLS || grid[enemy.y][ex] === STATE_REVEALED) enemy.dx *= -1;
             if (ey < 0 || ey >= ROWS || grid[ey][enemy.x] === STATE_REVEALED) enemy.dy *= -1;
-
             enemy.x = Math.max(0, Math.min(COLS-1, enemy.x + enemy.dx));
             enemy.y = Math.max(0, Math.min(ROWS-1, enemy.y + enemy.dy));
-
             if (grid[enemy.y][enemy.x] === STATE_TRAIL) triggerGameOver(timestamp);
         }
-
         if (player.x === enemy.x && player.y === enemy.y) triggerGameOver(timestamp);
     }
     else if (currentMode === MODE_GAME_OVER && timestamp - stateResetTimer >= 1800) {
         resetGame();
     }
-
     draw();
     requestAnimationFrame(update);
 }
 
 function floodFillSlice() {
-    // (same as your original - kept unchanged for brevity)
     let visited = Array(ROWS).fill().map(() => Array(COLS).fill(false));
     let queue = [[enemy.x, enemy.y]];
     if (enemy.x >= 0 && enemy.x < COLS && enemy.y >= 0 && enemy.y < ROWS) visited[enemy.y][enemy.x] = true;
-
     const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
     while (queue.length) {
         let [cx, cy] = queue.shift();
@@ -216,33 +176,24 @@ function floodFillSlice() {
             }
         }
     }
-
     let remaining = 0;
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            if (grid[r][c] === STATE_HIDDEN) {
-                if (!visited[r][c]) grid[r][c] = STATE_REVEALED;
-                else remaining++;
-            } else if (grid[r][c] === STATE_TRAIL) {
-                grid[r][c] = STATE_REVEALED;
-            }
-        }
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] === STATE_HIDDEN) {
+            if (!visited[r][c]) grid[r][c] = STATE_REVEALED;
+            else remaining++;
+        } else if (grid[r][c] === STATE_TRAIL) grid[r][c] = STATE_REVEALED;
     }
-
     const total = (COLS-2)*(ROWS-2);
     revealedPercentage = total > 0 ? Math.floor(((total - remaining) / total) * 100) : 0;
     percentDisplay.textContent = Math.max(0, revealedPercentage);
-
     if (revealedPercentage >= 75) triggerLevelClear();
 }
 
 function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
     if (currentMode === MODE_LEVEL_CLEAR) return;
-
     ctx.fillStyle = '#1f1f2e';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
     ctx.globalCompositeOperation = 'destination-out';
     for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
@@ -250,17 +201,12 @@ function draw() {
         }
     }
     ctx.globalCompositeOperation = 'source-over';
-
     ctx.fillStyle = '#e91e63';
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            if (grid[r][c] === STATE_TRAIL) ctx.fillRect(c*CELL_SIZE, r*CELL_SIZE, CELL_SIZE, CELL_SIZE);
-        }
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] === STATE_TRAIL) ctx.fillRect(c*CELL_SIZE, r*CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
-
     ctx.fillStyle = '#00ffff';
     ctx.fillRect(player.x*CELL_SIZE, player.y*CELL_SIZE, CELL_SIZE, CELL_SIZE);
-
     ctx.fillStyle = '#ff3333';
     ctx.beginPath();
     ctx.arc(enemy.x*CELL_SIZE + CELL_SIZE/2, enemy.y*CELL_SIZE + CELL_SIZE/2, 4, 0, Math.PI*2);
@@ -309,7 +255,7 @@ function setDirection(dir) {
     player.nextDir = dir;
 }
 
-// Input
+// Input handlers
 window.addEventListener('keydown', e => {
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
     if (e.key === ' ' || e.code === 'Space') {
@@ -330,20 +276,19 @@ document.querySelectorAll('#reveal-game button').forEach(b => {
         if (b.id === 'btn-left') setDirection('LEFT');
         if (b.id === 'btn-right') setDirection('RIGHT');
     });
+    b.addEventListener('touchstart', e => e.preventDefault());
 });
 
-document.getElementById('btn-random').addEventListener('click', () => {
-    initImage();
+document.getElementById('reveal-game').addEventListener('click', () => {
+    if (currentMode === MODE_LEVEL_CLEAR) startNextLevel();
 });
 
-// Start
+// Start the game
 (async () => {
-    await loadImageList();
+    await loadAllImages();
     initGrid();
     initImage();
     messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
     requestAnimationFrame(update);
 })();
 </script>
-</body>
-</html>
