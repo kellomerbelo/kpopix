@@ -1,0 +1,313 @@
+<div id="reveal-game-wrapper" style="display: inline-block; position: relative; max-width: 340px; margin: 20px auto;">
+    <div id="reveal-game" style="position: relative; width: 300px; margin: 0 auto; border: 4px solid #333; background: #111; overflow: hidden;">
+        
+        <div class="hud" style="padding: 8px; text-align: center; color: white; font-family: Arial, sans-serif;">
+            Level: <span id="level-num">1</span> | 
+            Revealed: <span id="percent">0</span>%
+        </div>
+        
+        <div style="position: relative;">
+            <img id="bg-image" style="position: absolute; top: 0; left: 0; width: 300px; height: 400px; object-fit: cover; z-index: 1;" alt="">
+            <canvas id="gameCanvas" width="300" height="400" style="position: relative; z-index: 2; image-rendering: pixelated;"></canvas>
+        </div>
+        
+        <div id="message" style="padding: 10px; text-align: center; min-height: 50px; font-family: Arial, sans-serif;"></div>
+        
+        <div class="controls" style="padding: 10px; text-align: center;">
+            <button id="btn-up" style="width:60px;height:60px;font-size:24px;margin:2px;">↑</button><br>
+            <button id="btn-left" style="width:60px;height:60px;font-size:24px;margin:2px;">←</button>
+            <button id="btn-down" style="width:60px;height:60px;font-size:24px;margin:2px;">↓</button>
+            <button id="btn-right" style="width:60px;height:60px;font-size:24px;margin:2px;">→</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ==================== AUTO IMAGE LOADER ====================
+let imageList = [];
+
+async function loadAllImages() {
+    imageList = [];
+    const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const maxImages = 50; // Increase if you have more than 50 images
+
+    for (let i = 1; i <= maxImages; i++) {
+        for (let ext of extensions) {
+            const path = `images/pic${i}${ext}`;
+            try {
+                const img = new Image();
+                await new Promise((resolve, reject) => {
+                    img.onload = () => resolve(path);
+                    img.onerror = () => reject();
+                    img.src = path;
+                });
+                imageList.push(path);
+                break; // Found one with this number
+            } catch (e) {
+                // Try next extension
+            }
+        }
+    }
+
+    if (imageList.length === 0) {
+        console.warn("No images found in /images/ folder!");
+        imageList = ['images/pic1.jpg']; // fallback
+    }
+    console.log(`Loaded ${imageList.length} images automatically`);
+}
+
+// ==================== GAME CODE ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const bgImage = document.getElementById('bg-image');
+const percentDisplay = document.getElementById('percent');
+const messageDisplay = document.getElementById('message');
+const levelDisplay = document.getElementById('level-num');
+
+const WIDTH = 300, HEIGHT = 400;
+canvas.width = WIDTH; canvas.height = HEIGHT;
+
+const CELL_SIZE = 5;
+const COLS = WIDTH / CELL_SIZE;
+const ROWS = HEIGHT / CELL_SIZE;
+
+const STATE_REVEALED = 0, STATE_HIDDEN = 1, STATE_TRAIL = 2;
+const MODE_PLAYING = 'PLAYING', MODE_LEVEL_CLEAR = 'LEVEL_CLEAR', MODE_GAME_OVER = 'GAME_OVER';
+
+let currentMode = MODE_PLAYING;
+let grid = [];
+let player = { x: 0, y: 0, dir: null, nextDir: null, drawing: false, lastMoveTime: 0 };
+let currentLevel = 1;
+let enemy = { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2), dx: 1, dy: 1, lastMoveTime: 0 };
+let revealedPercentage = 0;
+let stateResetTimer = 0;
+
+const PLAYER_MOVE_DELAY = 35;
+
+function initGrid() {
+    grid = Array(ROWS).fill().map(() => Array(COLS).fill(STATE_HIDDEN));
+    for (let r = 0; r < ROWS; r++) {
+        grid[r][0] = grid[r][COLS-1] = STATE_REVEALED;
+    }
+    for (let c = 0; c < COLS; c++) {
+        grid[0][c] = grid[ROWS-1][c] = STATE_REVEALED;
+    }
+}
+
+function initImage() {
+    if (imageList.length === 0) return;
+    const randomPic = imageList[Math.floor(Math.random() * imageList.length)];
+    bgImage.src = randomPic;
+}
+
+// Game functions (update, draw, floodFillSlice, etc.) - same as before
+function update(timestamp) {
+    if (currentMode === MODE_PLAYING) {
+        // Direction handling
+        if (player.nextDir) {
+            let invalid = false;
+            if (player.drawing) {
+                if ((player.dir === 'UP' && player.nextDir === 'DOWN') || 
+                    (player.dir === 'DOWN' && player.nextDir === 'UP') ||
+                    (player.dir === 'LEFT' && player.nextDir === 'RIGHT') ||
+                    (player.dir === 'RIGHT' && player.nextDir === 'LEFT')) invalid = true;
+            }
+            if (!invalid) player.dir = player.nextDir;
+            player.nextDir = null;
+        }
+
+        // Player move
+        if (player.dir && (!player.lastMoveTime || timestamp - player.lastMoveTime >= PLAYER_MOVE_DELAY)) {
+            player.lastMoveTime = timestamp;
+            let nx = player.x, ny = player.y;
+            if (player.dir === 'UP') ny--;
+            if (player.dir === 'DOWN') ny++;
+            if (player.dir === 'LEFT') nx--;
+            if (player.dir === 'RIGHT') nx++;
+
+            if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
+                const st = grid[ny][nx];
+                if (st === STATE_HIDDEN) {
+                    grid[ny][nx] = STATE_TRAIL;
+                    player.x = nx; player.y = ny;
+                    player.drawing = true;
+                } else if (st === STATE_TRAIL) {
+                    triggerGameOver(timestamp);
+                } else if (st === STATE_REVEALED) {
+                    player.x = nx; player.y = ny;
+                    if (player.drawing) {
+                        player.drawing = false;
+                        player.dir = null;
+                        floodFillSlice();
+                    }
+                }
+            }
+        }
+
+        // Enemy
+        let delay = Math.max(20, 130 - currentLevel * 15);
+        if (!enemy.lastMoveTime) enemy.lastMoveTime = timestamp;
+        if (timestamp - enemy.lastMoveTime >= delay) {
+            enemy.lastMoveTime = timestamp;
+            let ex = enemy.x + enemy.dx;
+            let ey = enemy.y + enemy.dy;
+
+            if (ex < 0 || ex >= COLS || grid[enemy.y][ex] === STATE_REVEALED) enemy.dx *= -1;
+            if (ey < 0 || ey >= ROWS || grid[ey][enemy.x] === STATE_REVEALED) enemy.dy *= -1;
+
+            enemy.x = Math.max(0, Math.min(COLS-1, enemy.x + enemy.dx));
+            enemy.y = Math.max(0, Math.min(ROWS-1, enemy.y + enemy.dy));
+
+            if (grid[enemy.y][enemy.x] === STATE_TRAIL) triggerGameOver(timestamp);
+        }
+
+        if (player.x === enemy.x && player.y === enemy.y) triggerGameOver(timestamp);
+    } 
+    else if (currentMode === MODE_GAME_OVER && timestamp - stateResetTimer >= 1800) {
+        resetGame();
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+function floodFillSlice() {
+    let visited = Array(ROWS).fill().map(() => Array(COLS).fill(false));
+    let queue = [[enemy.x, enemy.y]];
+    if (enemy.x >= 0 && enemy.x < COLS && enemy.y >= 0 && enemy.y < ROWS) visited[enemy.y][enemy.x] = true;
+
+    const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+    while (queue.length) {
+        let [cx, cy] = queue.shift();
+        for (let [dx, dy] of dirs) {
+            let nx = cx + dx, ny = cy + dy;
+            if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && !visited[ny][nx] && grid[ny][nx] === STATE_HIDDEN) {
+                visited[ny][nx] = true;
+                queue.push([nx, ny]);
+            }
+        }
+    }
+
+    let remaining = 0;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] === STATE_HIDDEN) {
+            if (!visited[r][c]) grid[r][c] = STATE_REVEALED;
+            else remaining++;
+        } else if (grid[r][c] === STATE_TRAIL) grid[r][c] = STATE_REVEALED;
+    }
+
+    const total = (COLS-2)*(ROWS-2);
+    revealedPercentage = total > 0 ? Math.floor(((total - remaining) / total) * 100) : 0;
+    percentDisplay.textContent = Math.max(0, revealedPercentage);
+
+    if (revealedPercentage >= 75) triggerLevelClear();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    if (currentMode === MODE_LEVEL_CLEAR) return;
+
+    ctx.fillStyle = '#1f1f2e';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] === STATE_REVEALED) ctx.fillRect(c*CELL_SIZE, r*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.fillStyle = '#e91e63';
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] === STATE_TRAIL) ctx.fillRect(c*CELL_SIZE, r*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    }
+
+    ctx.fillStyle = '#00ffff';
+    ctx.fillRect(player.x*CELL_SIZE, player.y*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath();
+    ctx.arc(enemy.x*CELL_SIZE + CELL_SIZE/2, enemy.y*CELL_SIZE + CELL_SIZE/2, 4, 0, Math.PI*2);
+    ctx.fill();
+}
+
+function triggerLevelClear() {
+    currentMode = MODE_LEVEL_CLEAR;
+    messageDisplay.innerHTML = `<b style="color:#4caf50">Level ${currentLevel} Clear! 🎉</b><br>Press SPACE or tap`;
+}
+
+function startNextLevel() {
+    currentLevel++;
+    levelDisplay.textContent = currentLevel;
+    player = { x: 0, y: 0, dir: null, nextDir: null, drawing: false, lastMoveTime: 0 };
+    enemy = { x: Math.floor(COLS/2), y: Math.floor(ROWS/2), dx: Math.random()>0.5?1:-1, dy: Math.random()>0.5?1:-1, lastMoveTime: 0 };
+    initGrid();
+    percentDisplay.textContent = 0;
+    messageDisplay.textContent = `Level ${currentLevel}: Avoid the spark!`;
+    initImage();
+    currentMode = MODE_PLAYING;
+}
+
+function triggerGameOver(ts) {
+    if (currentMode === MODE_GAME_OVER) return;
+    currentMode = MODE_GAME_OVER;
+    stateResetTimer = ts;
+    messageDisplay.innerHTML = `<b style="color:#f44336">Game Over!</b><br>Restarting...`;
+}
+
+function resetGame() {
+    player = { x: 0, y: 0, dir: null, nextDir: null, drawing: false, lastMoveTime: 0 };
+    enemy = { x: Math.floor(COLS/2), y: Math.floor(ROWS/2), dx: 1, dy: 1, lastMoveTime: 0 };
+    currentLevel = 1;
+    levelDisplay.textContent = 1;
+    initGrid();
+    percentDisplay.textContent = 0;
+    messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
+    initImage();
+    currentMode = MODE_PLAYING;
+}
+
+function setDirection(dir) {
+    if (currentMode === MODE_LEVEL_CLEAR) { startNextLevel(); return; }
+    if (currentMode !== MODE_PLAYING) return;
+    player.nextDir = dir;
+}
+
+// Input
+window.addEventListener('keydown', e => {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        if (currentMode === MODE_LEVEL_CLEAR) startNextLevel();
+        return;
+    }
+    if (e.key === 'ArrowUp' || e.key.toLowerCase()==='w') setDirection('UP');
+    if (e.key === 'ArrowDown' || e.key.toLowerCase()==='s') setDirection('DOWN');
+    if (e.key === 'ArrowLeft' || e.key.toLowerCase()==='a') setDirection('LEFT');
+    if (e.key === 'ArrowRight' || e.key.toLowerCase()==='d') setDirection('RIGHT');
+});
+
+document.querySelectorAll('#reveal-game button').forEach(b => {
+    b.addEventListener('click', () => {
+        if (b.id === 'btn-up') setDirection('UP');
+        if (b.id === 'btn-down') setDirection('DOWN');
+        if (b.id === 'btn-left') setDirection('LEFT');
+        if (b.id === 'btn-right') setDirection('RIGHT');
+    });
+    b.addEventListener('touchstart', e => e.preventDefault());
+});
+
+document.getElementById('reveal-game').addEventListener('click', () => {
+    if (currentMode === MODE_LEVEL_CLEAR) startNextLevel();
+});
+
+// Start everything
+(async () => {
+    await loadAllImages();
+    initGrid();
+    initImage();
+    messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
+    requestAnimationFrame(update);
+})();
+</script>
