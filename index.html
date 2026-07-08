@@ -23,43 +23,48 @@
 </div>
 
 <script>
-// ==================== FIXED IMAGE LOADER ====================
-let imageList = [];
+// ==================== FAST ON-DEMAND IMAGE LOADER ====================
+const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+let currentImageIndex = 1; // start from pic1
 
-async function loadAllImages() {
-    imageList = [];
-    const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
-    const maxImages = 50;
+function loadRandomImage() {
+    const bg = document.getElementById('bg-image');
+    let attempts = 0;
+    const maxAttempts = 8; // try up to 8 different numbers if one fails
 
-    for (let i = 1; i <= maxImages; i++) {
+    function tryLoad() {
+        if (attempts >= maxAttempts) {
+            // fallback
+            bg.src = 'https://picsum.photos/id/1015/300/400';
+            return;
+        }
+        
+        const num = Math.floor(Math.random() * 50) + 1; // random pic1 to pic50
+        let loaded = false;
+
         for (let ext of extensions) {
-            const path = `images/pic${i}${ext}`;
-            try {
-                const exists = await new Promise((resolve) => {
-                    const img = new Image();
-                    img.onload = () => resolve(true);
-                    img.onerror = () => resolve(false);
-                    img.src = path;
-                });
-                if (exists) {
-                    imageList.push(path);
-                    break;
+            const path = `images/pic${num}${ext}`;
+            bg.src = path;
+            
+            // Stop after first successful load
+            bg.onload = () => {
+                if (!loaded) {
+                    loaded = true;
+                    console.log(`Loaded image: pic${num}${ext}`);
                 }
-            } catch (e) {}
+            };
+            
+            bg.onerror = () => {
+                attempts++;
+                if (!loaded) tryLoad(); // try next number
+            };
+            
+            // Only try one extension per number for speed
+            break;
         }
     }
-
-    if (imageList.length === 0) {
-        console.warn("No images found in /images/ folder!");
-        imageList = ['https://picsum.photos/id/1015/300/400']; // public fallback
-    }
-    console.log(`Loaded ${imageList.length} images automatically`);
-}
-
-function initImage() {
-    if (imageList.length === 0) return;
-    const randomPic = imageList[Math.floor(Math.random() * imageList.length)];
-    document.getElementById('bg-image').src = randomPic;
+    
+    tryLoad();
 }
 
 // ==================== GAME CODE ====================
@@ -72,7 +77,6 @@ const levelDisplay = document.getElementById('level-num');
 
 const WIDTH = 300, HEIGHT = 400;
 canvas.width = WIDTH; canvas.height = HEIGHT;
-
 const CELL_SIZE = 5;
 const COLS = WIDTH / CELL_SIZE;
 const ROWS = HEIGHT / CELL_SIZE;
@@ -226,7 +230,7 @@ function startNextLevel() {
     initGrid();
     percentDisplay.textContent = 0;
     messageDisplay.textContent = `Level ${currentLevel}: Avoid the spark!`;
-    initImage();
+    loadRandomImage();        // ← Fast individual load
     currentMode = MODE_PLAYING;
 }
 
@@ -245,7 +249,7 @@ function resetGame() {
     initGrid();
     percentDisplay.textContent = 0;
     messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
-    initImage();
+    loadRandomImage();        // ← Fast individual load
     currentMode = MODE_PLAYING;
 }
 
@@ -255,7 +259,7 @@ function setDirection(dir) {
     player.nextDir = dir;
 }
 
-// Input handlers
+// Input
 window.addEventListener('keydown', e => {
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
     if (e.key === ' ' || e.code === 'Space') {
@@ -283,11 +287,10 @@ document.getElementById('reveal-game').addEventListener('click', () => {
     if (currentMode === MODE_LEVEL_CLEAR) startNextLevel();
 });
 
-// Start the game
+// Start game
 (async () => {
-    await loadAllImages();
     initGrid();
-    initImage();
+    loadRandomImage();           // Load one image immediately
     messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
     requestAnimationFrame(update);
 })();
