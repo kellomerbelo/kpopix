@@ -23,54 +23,41 @@
 </div>
 
 <script>
-// ==================== FAST ON-DEMAND IMAGE LOADER ====================
-const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
-let currentImageIndex = 1; // start from pic1
-
+// ==================== GENERIC RANDOM IMAGE LOADER ====================
 function loadRandomImage() {
     const bg = document.getElementById('bg-image');
     let attempts = 0;
-    const maxAttempts = 8; // try up to 8 different numbers if one fails
+    const maxAttempts = 30;   // safety limit
 
-    function tryLoad() {
+    const tryLoad = () => {
         if (attempts >= maxAttempts) {
-            // fallback
             bg.src = 'https://picsum.photos/id/1015/300/400';
+            console.log("Using fallback image");
             return;
         }
-        
-        const num = Math.floor(Math.random() * 50) + 1; // random pic1 to pic50
-        let loaded = false;
 
-        for (let ext of extensions) {
-            const path = `images/pic${num}${ext}`;
-            bg.src = path;
-            
-            // Stop after first successful load
-            bg.onload = () => {
-                if (!loaded) {
-                    loaded = true;
-                    console.log(`Loaded image: pic${num}${ext}`);
-                }
-            };
-            
-            bg.onerror = () => {
-                attempts++;
-                if (!loaded) tryLoad(); // try next number
-            };
-            
-            // Only try one extension per number for speed
-            break;
-        }
-    }
-    
+        attempts++;
+        const num = Math.floor(Math.random() * 50) + 1; // tries 1 to 50
+        const path = `images/img${num}.png`;
+
+        bg.src = path;
+
+        bg.onload = () => {
+            console.log(`✅ Loaded: img${num}.png`);
+        };
+
+        bg.onerror = () => {
+            console.log(`Not found: img${num}.png → trying another`);
+            tryLoad(); // try a different random number
+        };
+    };
+
     tryLoad();
 }
 
 // ==================== GAME CODE ====================
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const bgImage = document.getElementById('bg-image');
 const percentDisplay = document.getElementById('percent');
 const messageDisplay = document.getElementById('message');
 const levelDisplay = document.getElementById('level-num');
@@ -95,24 +82,19 @@ const PLAYER_MOVE_DELAY = 35;
 
 function initGrid() {
     grid = Array(ROWS).fill().map(() => Array(COLS).fill(STATE_HIDDEN));
-    for (let r = 0; r < ROWS; r++) {
-        grid[r][0] = grid[r][COLS-1] = STATE_REVEALED;
-    }
-    for (let c = 0; c < COLS; c++) {
-        grid[0][c] = grid[ROWS-1][c] = STATE_REVEALED;
-    }
+    for (let r = 0; r < ROWS; r++) grid[r][0] = grid[r][COLS-1] = STATE_REVEALED;
+    for (let c = 0; c < COLS; c++) grid[0][c] = grid[ROWS-1][c] = STATE_REVEALED;
 }
 
 function update(timestamp) {
     if (currentMode === MODE_PLAYING) {
         if (player.nextDir) {
             let invalid = false;
-            if (player.drawing) {
-                if ((player.dir === 'UP' && player.nextDir === 'DOWN') ||
-                    (player.dir === 'DOWN' && player.nextDir === 'UP') ||
-                    (player.dir === 'LEFT' && player.nextDir === 'RIGHT') ||
-                    (player.dir === 'RIGHT' && player.nextDir === 'LEFT')) invalid = true;
-            }
+            if (player.drawing && 
+                ((player.dir === 'UP' && player.nextDir === 'DOWN') ||
+                 (player.dir === 'DOWN' && player.nextDir === 'UP') ||
+                 (player.dir === 'LEFT' && player.nextDir === 'RIGHT') ||
+                 (player.dir === 'RIGHT' && player.nextDir === 'LEFT'))) invalid = true;
             if (!invalid) player.dir = player.nextDir;
             player.nextDir = null;
         }
@@ -230,7 +212,7 @@ function startNextLevel() {
     initGrid();
     percentDisplay.textContent = 0;
     messageDisplay.textContent = `Level ${currentLevel}: Avoid the spark!`;
-    loadRandomImage();        // ← Fast individual load
+    loadRandomImage();
     currentMode = MODE_PLAYING;
 }
 
@@ -249,7 +231,7 @@ function resetGame() {
     initGrid();
     percentDisplay.textContent = 0;
     messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
-    loadRandomImage();        // ← Fast individual load
+    loadRandomImage();
     currentMode = MODE_PLAYING;
 }
 
@@ -259,7 +241,7 @@ function setDirection(dir) {
     player.nextDir = dir;
 }
 
-// Input
+// Input controls
 window.addEventListener('keydown', e => {
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
     if (e.key === ' ' || e.code === 'Space') {
@@ -280,18 +262,15 @@ document.querySelectorAll('#reveal-game button').forEach(b => {
         if (b.id === 'btn-left') setDirection('LEFT');
         if (b.id === 'btn-right') setDirection('RIGHT');
     });
-    b.addEventListener('touchstart', e => e.preventDefault());
 });
 
 document.getElementById('reveal-game').addEventListener('click', () => {
     if (currentMode === MODE_LEVEL_CLEAR) startNextLevel();
 });
 
-// Start game
-(async () => {
-    initGrid();
-    loadRandomImage();           // Load one image immediately
-    messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
-    requestAnimationFrame(update);
-})();
+// Start the game
+initGrid();
+loadRandomImage();
+messageDisplay.textContent = "Draw lines • Reveal the image • Avoid the spark!";
+requestAnimationFrame(update);
 </script>
